@@ -1,16 +1,14 @@
 package com.example.api.domain;
 
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
+import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @NoArgsConstructor
 @Entity
 @Getter
+@Table(name = "TB_COUPON")
 public class Coupon {
 
 

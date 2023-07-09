@@ -3,9 +3,11 @@ package com.example.api.service;
 
 import com.example.api.domain.Coupon;
 import com.example.api.producer.CouponCreateProducer;
-import com.example.api.repository.CouponCountRepository;
+import com.example.api.repository.CouponRedisSupportRepository;
 import com.example.api.repository.CouponRepository;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,12 +23,15 @@ public class ApplyService {
 
 
    //레디스 레포지토리
-   private final CouponCountRepository couponCountRepository;
+   private final CouponRedisSupportRepository couponRedisSupportRepository;
 
    // 카프카템플릿
     private final CouponCreateProducer couponCreateProducer;
 
-   /**
+    private final Logger logger = LoggerFactory.getLogger(ApplyService.class);
+
+
+    /**
     * 쿠폰발급 조건
     * 1. 100개를 초과해서 발급 x
     * 2. 쿠폰테이블에서 쿠폰의 총 갯수를 가져온다
@@ -58,7 +63,7 @@ public class ApplyService {
      * @param userId
      */
     public void applyRedis(Long userId){
-        long totalCount = couponCountRepository.increment();
+        long totalCount = couponRedisSupportRepository.applyCouponCountIncrement();
 
         if(totalCount > 100 ){
             return ;
@@ -70,18 +75,29 @@ public class ApplyService {
 
     /**
      * 카프카이용 ( 이벤트 큐 )
-     * 1. 레디스를 이용하여 멀티스레드 환경에서 레이스 컨디션 방지
-     * 2. db에 바로 insert하지 않고 ( 메세지 큐 서비스 이용하여 순차적으로 디비에 넣는다 )
-     * 3. 프로듀서를 이용하여 특정 topic에 넣어둔뒤 컨슈머에서 가져간다.
+     * 1. 한명이 여러개의 쿠폰을 가질수 없다! 1개만 발급되도록 하기위해 REDIS의 SET 구조 이용
+     * 2. 레디스를 이용하여 멀티스레드 환경에서 레이스 컨디션 방지
+     * 3. db에 바로 insert하지 않고 ( 메세지 큐 서비스 이용하여 순차적으로 디비에 넣는다 )
+     * 4. 프로듀서를 이용하여 특정 topic에 넣어둔뒤 컨슈머에서 가져간다.
      */
 
-    public void applyKafka(String userId){
+    public void applyKafka(Long userId){
 
-        long totalCount = couponCountRepository.increment();
+        // 쿠폰을 이미 발급받은 유저인지 체크
+        Long checkUser = couponRedisSupportRepository.checkAppliedUser(userId);
+
+        if(checkUser != 1 ){
+            logger.error("The user has already been issued a coupon");
+            return;
+        }
+
+        // 쿠폰 발급 가능한 총 갯수를 초과하였는지 체크
+        long totalCount = couponRedisSupportRepository.applyCouponCountIncrement();
 
         if(totalCount > 100 ){
+            logger.error("The number of coupons that can be issued has exceeded 100");
             return ;
         }
-        couponCreateProducer.createCoupon(userId);
+        couponCreateProducer.createCoupon(userId.toString());
     }
 }

@@ -1,8 +1,7 @@
 package com.example.api.service;
 
-import com.example.api.repository.CouponCountRepository;
+import com.example.api.repository.CouponRedisSupportRepository;
 import com.example.api.repository.CouponRepository;
-import org.assertj.core.api.AssertionsForClassTypes;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -12,7 +11,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.AssertionsForClassTypes.*;
-import static org.junit.jupiter.api.Assertions.*;
 
 
 @SpringBootTest
@@ -27,7 +25,7 @@ class ApplyServiceTest {
 
 
      @Autowired
-     private CouponCountRepository couponCountRepository;
+     private CouponRedisSupportRepository couponRedisSupportRepository;
 
     @Test
      public void 한번만응모(){
@@ -117,7 +115,7 @@ class ApplyServiceTest {
                     // 레디스를 이용하여 레이스 컨디션 해결하지만 디비에 부하가 갈수가 있다.
 //                    applyService.applyRedis(userId);
                     // 카프카를 이용하여 특정 topic에 넣어둔뒤 순차적으로 컨슈머가 가져가 db에 insert 한다
-                    applyService.applyKafka(String.valueOf(userId));
+                    applyService.applyKafka(userId);
                 }finally {
                     latch.countDown();
                 }
@@ -140,6 +138,49 @@ class ApplyServiceTest {
 
         //then
         assertThat(totalCount).isEqualTo(100);
+    }
+
+
+    /**
+     * 테스트 상황
+     * 1. 1이라는 유저가 1000번의 요청을 보내도 1번만 발급되는지 확인!
+     * @throws InterruptedException
+     */
+    @Test
+    public void 한명당_하나의쿠폰발급() throws InterruptedException {
+
+        // 유저아이디 고정값
+        long userId  = 1L;
+
+
+        // 1000개의 요청을 보낸다.
+        int threadCount = 1000;
+        // 동시에 여러개의 요청을 보내기 위해 멀티스레드 환경 구성 (병렬 작업 )
+        ExecutorService executorService = Executors.newFixedThreadPool(32);
+
+        // 모든 요청이 끝날때까지 기다리기 위해 CountDowLatch 사용
+        // 다른 스레드에서 작업되고 있는 내용을 기다려주게 하는 클래스
+        CountDownLatch latch = new CountDownLatch(threadCount);
+        // 1000개의 요청을 위한 로직
+        for(int i = 0; i < threadCount; i++){
+
+            executorService.submit(()->{
+                try{
+
+                    applyService.applyKafka(userId);
+                }finally {
+                    latch.countDown();
+                }
+            });
+        }
+
+        latch.await();
+
+
+        long totalCount = couponRepository.count();
+
+
+        assertThat(totalCount).isEqualTo(1);
     }
 
 }
